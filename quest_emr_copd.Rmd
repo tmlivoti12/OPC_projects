@@ -1,0 +1,596 @@
+---
+title: "Exacerbation Rates Comparison: Questionnaire vs. EMR - COPD Patients"
+author: 
+-  Tessa LiVoti
+output:
+  rmdformats::readthedown:
+    number_sections: true
+    highlight: kate
+    mathjax: false
+    use_bookdown: true
+    cards: true
+    css: custom.css
+    toc_float: true
+      
+---
+
+<style type="text/css">
+.main-container {
+  max-width: 1000px !important;
+  margin-left: auto;
+  margin-right: auto;
+}
+div.rect {
+  border: 2px solid #cb6328;
+  border-radius: 15px;
+  padding: 10px;
+}
+</style>
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = F, comment="", fig.height=5, fig.pos='H')
+library(highcharter)
+library(htmlwidgets)
+library(kableExtra)
+library(htmltools)
+library(lubridate)
+library(ggplot2)
+library(dplyr)
+library(Hmisc)
+library(knitr)
+library(tidyr)
+library(RODBC) 
+library(DT)
+library(plotrix) # for std.error function
+
+options(scipen=6, stringsAsFactors = F)
+
+lang <- getOption("highcharter.lang")
+lang$thousandsSep <-  ","
+options(highcharter.lang = lang)
+
+security <- read.csv("databasePass.csv", header = T)
+
+
+my_server <- "192.168.1.11"
+my_db <- "tessa_db"
+
+db <- odbcDriverConnect(paste0("DRIVER={SQL Server};
+                              server=",my_server,";
+                              database=",my_db,";
+                              uid=",security$UserName[1],";
+                              pwd=",security$Password[1]))
+# pull only covid19 exac questions
+questionnaire_pats <- sqlQuery(db, "select r.*, q.event_date from opcdw.dbo.f_quest_responses r inner join opcdw.dbo.f_quest_questionnaires q 
+                               on r.questionnaire_id = q.questionnaire_id and r.opc_patient_id = q.opc_patient_id where question_id = '121' 
+                               or question_id = '122' or question_id = '123'")
+questionnaire_pats <- questionnaire_pats %>% 
+  mutate(quest_patient_id =  paste0("'", opc_patient_id, "'")) 
+questionnaire_pats1 <- paste0(questionnaire_pats$quest_patient_id, collapse = ",")  
+
+report_data_query <- paste0("SELECT * FROM reports.dbo.opc_audit_patients where patient_id in (", questionnaire_pats1, ");")
+all_pats1 <- sqlQuery(db, report_data_query) %>% filter(!is.na(copd_diag) & is.na(copd_resolved)) %>% distinct()
+all_pats2 <- all_pats1 %>% select(c(patient_id)) %>% mutate(ehr = 1)
+
+questionnaire_pats <- questionnaire_pats %>% 
+  left_join(all_pats2, by = c("opc_patient_id" = "patient_id")) %>% 
+  filter(ehr == 1) %>% 
+  distinct()
+
+total_pats <- length(unique(questionnaire_pats$opc_patient_id))
+```
+
+# Purpose 
+
+The following is a report comparing a patients reported exacerbations vs. what is recorded in their EMR from Sept. 2019- Sept 2020. The population was restricted to <b>207 patients</b> from <b>5 practices</b> meeting the following criteria:
+
+* Had an audit date after Sept. 1, 2020.
+* Questionnaire data on exacerbations. 
+* Reported COPD on questionnaire
+
+---
+
+# EMR vs. Questionnaire exacerbation rates
+
+Comparing exacerbation rates using patient's EMR versus their Questionnaire answers. These are split into 3 categories, each containing patients that have had/reported at least 1 exacerbation in the following. 
+
+* Acute OCS Rrescriptions
+* Hopsital Admissions 
+* General Exacerbation Code
+
+
+```{r all_exac}
+ocs_exac_total_ehr <- nrow(all_pats1[(all_pats1$ocs_acute > 0),])
+ha_exac_total_ehr <- nrow(all_pats1[(all_pats1$hosp_admit > 0),])
+gen_exac_total_ehr <- nrow(all_pats1[(all_pats1$exacb_tot_codes > 0),])
+
+ocs_exac_total_q <- nrow(questionnaire_pats[(questionnaire_pats$question_id == 121 & questionnaire_pats$response > 0),])
+ha_exac_total_q <- nrow(questionnaire_pats[(questionnaire_pats$question_id == 122 & questionnaire_pats$response > 0),])
+gen_exac_total_q <- nrow(questionnaire_pats[(questionnaire_pats$question_id == 123 & questionnaire_pats$response > 0),])
+
+ocs_acute_quest <- filter(questionnaire_pats, question_id == 121) 
+
+hosp_admit_quest <- filter(questionnaire_pats, question_id == 122)
+
+gen_quest <- filter(questionnaire_pats, question_id == 123)
+
+
+emr_exac <- data.frame(y = round(c(ocs_exac_total_ehr, 
+                                                ha_exac_total_ehr, 
+                                                gen_exac_total_ehr)/total_pats*100,1),
+                                  count = format(c(ocs_exac_total_ehr, 
+                                                ha_exac_total_ehr, 
+                                                gen_exac_total_ehr), big.mark = ','))
+
+quest_exac <- data.frame(y = round(c(ocs_exac_total_q, 
+                                                 ha_exac_total_q, 
+                                                 gen_exac_total_q)/total_pats*100,1), 
+                                   count = format(c(ocs_exac_total_q, 
+                                                 ha_exac_total_q, 
+                                                 gen_exac_total_q), 
+                                                  big.mark = ','))
+
+
+library(highcharter)
+total_exac <- highchart() %>%
+  hc_chart(type = 'column') %>%
+  hc_xAxis(type="category", title = list(text = 'Exacerbation rate comparison'), labels = list(useHTML = T), 
+           categories = c('Acute OCS Prescription', 'Hospital Admissions', 'General Exacerbation')) %>%
+  hc_plotOptions(series = list(groupPadding = 0.2, pointPadding = -.4)) %>%
+  hc_add_series(name = "Questionnaire", data = quest_exac, useHTML = T,
+                color = '#9EB9D4') %>% 
+  hc_add_series(name = "EMR", data =  emr_exac, useHTML = T,
+                color = '#0D5295') %>%
+  hc_tooltip(pointFormat = '<b>{series.name}</b><br/><b>Percent of Pop</b>:{point.y}%<br/><b>Count</b>: {point.count}', 
+             useHTML = T)  %>%
+  hc_yAxis(labels = list(format = "{value}%"), tickInterval = 5)
+
+total_exac
+```
+Below are the standard error and average for each categorey. The following formula has been used for the standard error with Q being quesitonnaire answer and E being a patient's recorded EMR exacerbation. 
+
+<div class = "row", style = "display:flex; align-items:center;">
+<div style="float:left; width:35%;">
+$$SE = \sqrt{\frac{\sum(Q-E)^2}{N-2}}$$
+
+
+</div> 
+
+<div style="float:left; width:50%;">
+```{r mrcTable}
+# ocs
+ocs_acute_q <- filter(questionnaire_pats, question_id == 121) %>% 
+  mutate(exac_type = 'Acute OCS Prescription') %>% 
+  select(c(opc_patient_id, exac_type, response))%>% 
+  rename(patient_id = opc_patient_id, 
+         response_q = response) %>% 
+  filter(response_q < 350)
+ocs_acute_ehr <- all_pats1 %>% 
+  mutate(exac_type = 'Acute OCS Prescription') %>% 
+  select(c(patient_id, exac_type, ocs_acute))%>% 
+  rename(response_ehr = ocs_acute)
+
+sd_ocs <- left_join(ocs_acute_ehr, ocs_acute_q, by = c('patient_id', 'exac_type')) %>% 
+  distinct(patient_id, exac_type, .keep_all = T) 
+sd_ocs <- sd_ocs %>% 
+  mutate(
+    y_sub_yprime = response_q - response_ehr
+  ) %>% 
+  mutate(
+    y_sub_yprime_sq = (y_sub_yprime)^2
+  )
+
+hosp_admit_q <- filter(questionnaire_pats, question_id == 122)%>% 
+  mutate(exac_type = 'Hospital Admission') %>% 
+  select(c(opc_patient_id, exac_type, response))%>% 
+  rename(patient_id = opc_patient_id, 
+         response_q = response)
+hosp_admit_ehr <- all_pats1 %>% 
+  mutate(exac_type = 'Hospital Admission') %>% 
+  select(c(patient_id, exac_type, hosp_admit))%>% 
+  rename(response_ehr = hosp_admit)
+
+sd_ha <- left_join(hosp_admit_ehr, hosp_admit_q, by = c('patient_id', 'exac_type')) %>% 
+  distinct(patient_id, exac_type, .keep_all = T)%>%  
+  mutate(
+    y_sub_yprime = response_q - response_ehr
+  ) %>% 
+  mutate(
+    y_sub_yprime_sq = (y_sub_yprime)^2
+  )
+
+gen_q <- filter(questionnaire_pats, question_id == 123)%>% 
+  mutate(exac_type = 'General exacerbation') %>% 
+  select(c(opc_patient_id, exac_type, response)) %>% 
+  rename(patient_id = opc_patient_id, 
+         response_q = response) %>% 
+  filter(response_q < 500)
+gen_ehr <- all_pats1 %>% 
+  mutate(exac_type = 'General exacerbation') %>% 
+  select(c(patient_id, exac_type, exacb_tot_codes)) %>% 
+  rename(response_ehr = exacb_tot_codes)
+sd_gen <- left_join(gen_ehr, gen_q, by = c('patient_id', 'exac_type')) %>% 
+  distinct(patient_id, exac_type, .keep_all = T)%>% 
+  mutate(
+    y_sub_yprime = response_q - response_ehr
+  ) %>% 
+  mutate(
+    y_sub_yprime_sq = (y_sub_yprime)^2
+  )
+
+sd_ocs1 <- sqrt(sum(sd_ocs$y_sub_yprime_sq, na.rm = T)/(length(unique(sd_ocs$patient_id))-2))
+sd_ha1 <- sqrt(sum(sd_ha$y_sub_yprime_sq, na.rm = T)/(length(unique(sd_ha$patient_id))-2))
+sd_gen1 <- sqrt(sum(sd_gen$y_sub_yprime_sq, na.rm = T)/(length(unique(sd_gen$patient_id))-2))
+
+avg_ocs_emr <- mean(ocs_acute_ehr$response_ehr)
+avg_ha_emr <- mean(hosp_admit_ehr$response_ehr)
+avg_gen_emr <- mean(gen_ehr$response_ehr)
+
+avg_ocs_q <- mean(ocs_acute_q$response_q, na.rm = T)
+avg_ha_q <- mean(hosp_admit_q$response_q, na.rm = T)
+avg_gen_q <- mean(gen_q$response_q, na.rm = T)
+
+sd <- data.frame(measure = c('Acute OCS', 'Hospital Admissions', 'General Exacerbation'), 
+                 emr_avg = c(avg_ocs_emr, avg_ha_emr, avg_gen_emr), 
+                 q_avg = c(avg_ocs_q, avg_ha_q, avg_gen_q),
+                  ha_sd = c(sd_ocs1, sd_ha1, sd_gen1))
+
+
+colnames(sd)[1] <- 'Measure'
+colnames(sd)[2] <- 'EMR Average'
+colnames(sd)[3] <- 'Questionnaire Average'
+colnames(sd)[4] <- 'Standard Error'
+
+kable(sd, "html", escape = F, align = "l", booktab = T) %>%
+  row_spec(0, background = '#a9a9a9')
+
+
+```
+
+</div> 
+</div> 
+
+---
+
+# Acute OCS 
+
+This section breaks down each categorey by frequency followed by a scatter plot, including a regression line, plotting a patient's EMR recorded exacerbation against their Questionnaire reported exacerbations.
+
+```{r ocs_exac}
+ocs_exac_0_ehr <- nrow(all_pats1[(all_pats1$ocs_acute == 0),])
+ocs_exac_1_ehr <- nrow(all_pats1[(all_pats1$ocs_acute == 1),])
+ocs_exac_2_ehr <- nrow(all_pats1[(all_pats1$ocs_acute == 2),])
+ocs_exac_3p_ehr <- nrow(all_pats1[(all_pats1$ocs_acute > 2),])
+
+ocs_exac_0_q <- nrow(questionnaire_pats[(questionnaire_pats$question_id == 121 & questionnaire_pats$response == 0),])
+ocs_exac_1_q <- nrow(questionnaire_pats[(questionnaire_pats$question_id == 121 & questionnaire_pats$response == 1),])
+ocs_exac_2_q <- nrow(questionnaire_pats[(questionnaire_pats$question_id == 121 & questionnaire_pats$response == 2),])
+ocs_exac_3p_q <- nrow(questionnaire_pats[(questionnaire_pats$question_id == 121 & questionnaire_pats$response > 2),])
+
+emr_ocs <- data.frame(y = round(c(ocs_exac_0_ehr, 
+                                                ocs_exac_1_ehr, 
+                                                ocs_exac_2_ehr, 
+                                                ocs_exac_3p_ehr)/total_pats*100,1),
+                                  count = format(c(ocs_exac_0_ehr, 
+                                                ocs_exac_1_ehr, 
+                                                ocs_exac_2_ehr, 
+                                                ocs_exac_3p_ehr), big.mark = ','))
+
+quest_ocs <- data.frame(y = round(c(ocs_exac_0_q, 
+                                                 ocs_exac_1_q, 
+                                                 ocs_exac_2_q, 
+                                                 ocs_exac_3p_q)/total_pats*100,1), 
+                                   count = format(c(ocs_exac_0_q, 
+                                                 ocs_exac_1_q, 
+                                                 ocs_exac_2_q, 
+                                                 ocs_exac_3p_q), 
+                                                  big.mark = ','))
+
+exac0_ocs <- data.frame(y = c(ocs_exac_0_q, ocs_exac_0_ehr), 
+                      category = c('Questionnaire', 'EMR'))
+exac1_ocs <- data.frame(y = c(ocs_exac_1_q, ocs_exac_1_ehr), 
+                      category = c('Questionnaire', 'EMR'))
+exac2_ocs <- data.frame(y = c(ocs_exac_2_q, ocs_exac_2_ehr), 
+                      category = c('Questionnaire', 'EMR'))
+exac3p_ocs <- data.frame(y = c(ocs_exac_3p_q, ocs_exac_3p_ehr), 
+                      category = c('Questionnaire', 'EMR'))
+
+
+library(highcharter)
+ocs_exac <- highchart() %>%
+  hc_chart(type = "bar") %>%
+  hc_xAxis(type = "category", categories = c('Questionnaire', 'EMR')) %>%
+  hc_plotOptions(series = list(stacking = "percent", pointPadding = .1,
+                 dataLabels = list(enabled = T, formatter = JS(paste0("function() {
+                           if (this.y != 0) {
+                            perc = 100 * this.y / this.total
+                            return Highcharts.numberFormat(perc,0) + '%';
+                           } else {
+                            return null;}}")),
+                      style = list(textOutline = F))))  %>%
+  hc_add_series(name = "3+ Acute OCS Prescriptions", data = exac3p_ocs, color = '#E26F2D')%>%
+   hc_add_series(name = "2 Acute OCS Prescriptions", data = exac2_ocs, color = '#FFA977')%>%
+  hc_add_series(name = "1 Acute OCS Prescription", data = exac1_ocs, color = '#9EB9D4') %>%
+  hc_add_series(name = "0 Acute OCS Prescriptions", data = exac0_ocs, color = '#0D5295') %>%
+    hc_tooltip(pointFormat = '<b>{series.name}</b><br/><b>Count</b>: {point.y:,.0f}<br/><small>Total Patients: {point.total:,.0f}</small>',
+               useHTML = T, headerFormat = '') %>%
+    hc_legend(reversed = T) %>%
+    hc_yAxis(labels = list(format = "{value}%"), tickInterval = 10, minorTicks = T, minorTickInterval = 5) 
+
+ocs_exac
+```
+
+---
+
+## Acute OCS Breakdown
+
+```{r ocs_exac_scatter, message=FALSE, warning=FALSE}
+ocs_acute_q <- filter(questionnaire_pats, question_id == 121) %>% 
+  mutate(exac_type = 'Acute OCS Prescription') %>% 
+  select(c(opc_patient_id, exac_type, response))%>% 
+  rename(patient_id = opc_patient_id, 
+         response_q = response) 
+
+
+ocs_acute_ehr <- all_pats1 %>% 
+  mutate(exac_type = 'Acute OCS Prescription') %>% 
+  select(c(patient_id, exac_type, ocs_acute))%>% 
+  rename(response_ehr = ocs_acute)
+
+exac_scatter_test <- left_join(ocs_acute_ehr, ocs_acute_q, by = c('patient_id', 'exac_type')) %>% 
+  distinct(patient_id, exac_type, .keep_all = T)
+
+hchart(exac_scatter_test, "point", hcaes(response_ehr, response_q), regression = TRUE) %>% 
+  hc_colors(c("#d35400", "#2980b9", "#2ecc71")) %>% 
+  hc_add_dependency("plugins/highcharts-regression.js") %>% 
+  hc_xAxis(title = list(text = 'EMR Responses'), labels = list(useHTML = T), max = 30) %>%
+  hc_yAxis(title = list(text = 'Questionnaire Responses'), labels = list(useHTML = T), max = 30) %>%
+  hc_tooltip(pointFormat = '<b>EMR</b>: {point.x:,.0f}</b><br/><b>Questionnaire</b>: {point.y:,.0f}',
+               useHTML = T, headerFormat = '') 
+# 
+# 
+# ocs_hc <- highchart() %>%
+#   hc_add_series(exac_scatter_test, "scatter", hcaes(response_ehr, response_q), showInLegend = F) %>% 
+#   hc_add_series(exac_scatter_test, "line", hcaes(x = response_ehr, y = response_ehr), enableMouseTracking = F, showInLegend = F) %>% 
+#   hc_add_dependency("plugins/highcharts-regression.js")%>% 
+#   hc_xAxis(title = list(text = 'EMR Responses'), labels = list(useHTML = T), max = 30) %>%
+#   hc_yAxis(title = list(text = 'Questionnaire Responses'), labels = list(useHTML = T), max = 30) %>%
+#   hc_tooltip(pointFormat = '<b>EMR</b>: {point.x:,.0f}</b><br/><b>Qestionnaire</b>: {point.y:,.0f}',
+#                useHTML = T, headerFormat = '') 
+# 
+# ocs_hc
+
+```
+
+---
+
+# Hosptial Admissions
+
+```{r copd_exac}
+ha_exac_0_ehr <- nrow(all_pats1[(all_pats1$hosp_admit == 0),])
+ha_exac_1_ehr <- nrow(all_pats1[(all_pats1$hosp_admit == 1),])
+ha_exac_2_ehr <- nrow(all_pats1[(all_pats1$hosp_admit == 2),])
+ha_exac_3p_ehr <- nrow(all_pats1[(all_pats1$hosp_admit > 2),])
+
+ha_exac_0_q <- nrow(questionnaire_pats[(questionnaire_pats$question_id == 122 & questionnaire_pats$response == 0),])
+ha_exac_1_q <- nrow(questionnaire_pats[(questionnaire_pats$question_id == 122 & questionnaire_pats$response == 1),])
+ha_exac_2_q <- nrow(questionnaire_pats[(questionnaire_pats$question_id == 122 & questionnaire_pats$response == 2),])
+ha_exac_3p_q <- nrow(questionnaire_pats[(questionnaire_pats$question_id == 122 & questionnaire_pats$response > 2),])
+
+emr_ha <- data.frame(y = round(c(ha_exac_0_ehr, 
+                                              ha_exac_1_ehr, 
+                                              ha_exac_2_ehr, 
+                                              ha_exac_3p_ehr)/total_pats*100,1),
+                                    count = format(c(ha_exac_0_ehr, 
+                                              ha_exac_1_ehr, 
+                                              ha_exac_2_ehr, 
+                                              ha_exac_3p_ehr), big.mark = ','))
+
+quest_ha <- data.frame(y = round(c(ha_exac_0_q, 
+                                               ha_exac_1_q, 
+                                               ha_exac_2_q, 
+                                               ha_exac_3p_q)/total_pats*100,1), 
+                                     count = format(c(ha_exac_0_q, 
+                                               ha_exac_1_q, 
+                                               ha_exac_2_q, 
+                                               ha_exac_3p_q), 
+                                                    big.mark = ','))
+
+exac0_ha <- data.frame(y = c(ha_exac_0_q, ha_exac_0_ehr), 
+                      category = c('Questionnaire', 'EMR'))
+exac1_ha <- data.frame(y = c(ha_exac_1_q, ha_exac_1_ehr), 
+                      category = c('Questionnaire', 'EMR'))
+exac2_ha <- data.frame(y = c(ha_exac_2_q, ha_exac_2_ehr), 
+                      category = c('Questionnaire', 'EMR'))
+exac3p_ha <- data.frame(y = c(ha_exac_3p_q, ha_exac_3p_ehr), 
+                      category = c('Questionnaire', 'EMR'))
+
+
+library(highcharter)
+ha_exac <- highchart() %>%
+  hc_chart(type = "bar") %>%
+  hc_xAxis(type = "category", categories = c('Questionnaire', 'EMR')) %>%
+  hc_plotOptions(series = list(stacking = "percent", pointPadding = .1,
+                 dataLabels = list(enabled = T, formatter = JS(paste0("function() {
+                           if (this.y != 0) {
+                            perc = 100 * this.y / this.total
+                            return Highcharts.numberFormat(perc,0) + '%';
+                           } else {
+                            return null;}}")),
+                      style = list(textOutline = F)))) %>%
+  hc_add_series(name = "3+ Hosptial Admissions", data = exac3p_ha, color = '#E26F2D')%>%
+   hc_add_series(name = "2 Hosptial Admissions", data = exac2_ha, color = '#FFA977')%>%
+  hc_add_series(name = "1 Hosptial Admission", data = exac1_ha, color = '#9EB9D4') %>%
+  hc_add_series(name = "0 Hosptial Admissions", data = exac0_ha, color = '#0D5295') %>%
+    hc_tooltip(pointFormat = '<b>{series.name}</b><br/><b>Count</b>: {point.y:,.0f}<br/><small>Total Patients: {point.total:,.0f}</small>',
+               useHTML = T, headerFormat = '') %>%
+    hc_legend(reversed = T) %>%
+    hc_yAxis(labels = list(format = "{value}%"), tickInterval = 10, minorTicks = T, minorTickInterval = 5) 
+
+ha_exac
+```
+
+---
+
+## Hosptial Admission Breakdown
+
+The following outliers were captured in the Questionnaire data and used when calculating the regression line but are not shown on this graph: 
+
+* 1 patient reported 32 Hospital Admissions
+
+```{r ha_exac_scatter, message=FALSE, warning=FALSE}
+hosp_admit_q <- filter(questionnaire_pats, question_id == 122)%>% 
+  mutate(exac_type = 'Hospital Admission') %>% 
+  select(c(opc_patient_id, exac_type, response))%>% 
+  rename(patient_id = opc_patient_id, 
+         response_q = response)
+
+
+hosp_admit_ehr <- all_pats1 %>% 
+  mutate(exac_type = 'Hospital Admission') %>% 
+  select(c(patient_id, exac_type, hosp_admit))%>% 
+  rename(response_ehr = hosp_admit)
+
+
+
+exac_scatter_ha <- left_join(hosp_admit_ehr, hosp_admit_q, by = c('patient_id', 'exac_type')) %>% 
+  distinct(patient_id, exac_type, .keep_all = T)
+
+
+hchart(exac_scatter_ha, "point", hcaes(response_ehr, response_q), regression = TRUE) %>% 
+  hc_colors(c("#d35400", "#2980b9", "#2ecc71")) %>% 
+  hc_add_dependency("plugins/highcharts-regression.js") %>% 
+  hc_xAxis(title = list(text = 'EMR Responses'), labels = list(useHTML = T), max = 10) %>%
+  hc_yAxis(title = list(text = 'Questionnaire Responses'), labels = list(useHTML = T), max = 10) %>%
+  hc_tooltip(pointFormat = '<b>EMR</b>: {point.x:,.0f}</b><br/><b>Questionnaire</b>: {point.y:,.0f}',
+               useHTML = T, headerFormat = '') 
+# 
+# ha_hc <- highchart() %>%
+#   hc_add_series(exac_scatter_ha, "scatter", hcaes(response_ehr, response_q), showInLegend = F) %>% 
+#   hc_add_series(exac_scatter_ha, "line", hcaes(x = response_ehr, y = response_ehr), enableMouseTracking = F, showInLegend = F) %>% 
+#   hc_add_dependency("plugins/highcharts-regression.js")%>% 
+#   hc_xAxis(title = list(text = 'EMR Responses'), labels = list(useHTML = T), max = 10) %>%
+#   hc_yAxis(title = list(text = 'Questionnaire Responses'), labels = list(useHTML = T), max = 10) %>%
+#   hc_tooltip(pointFormat = '<b>EMR</b>: {point.x:,.0f}</b><br/><b>Qestionnaire</b>: {point.y:,.0f}',
+#                useHTML = T, headerFormat = '') 
+# 
+# ha_hc
+```
+
+---
+
+# General Exacerbations
+
+```{r gen_exac}
+gen_exac_0_ehr <- nrow(all_pats1[(all_pats1$exacb_tot_codes == 0),])
+gen_exac_1_ehr <- nrow(all_pats1[(all_pats1$exacb_tot_codes == 1),])
+gen_exac_2_ehr <- nrow(all_pats1[(all_pats1$exacb_tot_codes == 2),])
+gen_exac_3p_ehr <- nrow(all_pats1[(all_pats1$exacb_tot_codes > 2),])
+
+gen_exac_0_q <- nrow(questionnaire_pats[(questionnaire_pats$question_id == 123 & questionnaire_pats$response == 0),])
+gen_exac_1_q <- nrow(questionnaire_pats[(questionnaire_pats$question_id == 123 & questionnaire_pats$response == 1),])
+gen_exac_2_q <- nrow(questionnaire_pats[(questionnaire_pats$question_id == 123 & questionnaire_pats$response == 2),])
+gen_exac_3p_q <- nrow(questionnaire_pats[(questionnaire_pats$question_id == 123 & questionnaire_pats$response > 2),])
+
+
+emr_gen <- data.frame(y = round(c(gen_exac_0_ehr, 
+                                               gen_exac_1_ehr, 
+                                               gen_exac_2_ehr, 
+                                               gen_exac_3p_ehr)/total_pats*100,1),
+                                   count = format(c(gen_exac_0_ehr, 
+                                               gen_exac_1_ehr, 
+                                               gen_exac_2_ehr, 
+                                               gen_exac_3p_ehr), big.mark = ','))
+
+quest_gen <- data.frame(y = round(c(gen_exac_0_q, 
+                                                gen_exac_1_q, 
+                                                gen_exac_2_q, 
+                                                gen_exac_3p_q)/total_pats*100,1), 
+                                    count = format(c(gen_exac_0_q, 
+                                                gen_exac_1_q, 
+                                                gen_exac_2_q, 
+                                                gen_exac_3p_q)), 
+                                                   big.mark = ',')
+
+exac0_gen <- data.frame(y = c(gen_exac_0_q, gen_exac_0_ehr), 
+                      category = c('Questionnaire', 'EMR'))
+exac1_gen <- data.frame(y = c(gen_exac_1_q, gen_exac_1_ehr), 
+                      category = c('Questionnaire', 'EMR'))
+exac2_gen <- data.frame(y = c(gen_exac_2_q, gen_exac_2_ehr), 
+                      category = c('Questionnaire', 'EMR'))
+exac3p_gen <- data.frame(y = c(gen_exac_3p_q, gen_exac_3p_ehr), 
+                      category = c('Questionnaire', 'EMR'))
+
+
+library(highcharter)
+gen_exac <- highchart() %>%
+  hc_chart(type = "bar") %>%
+  hc_xAxis(type = "category", categories = c('Questionnaire', 'EMR')) %>%
+  hc_plotOptions(series = list(stacking = "percent", pointPadding = .1,
+                 dataLabels = list(enabled = T, formatter = JS(paste0("function() {
+                           if (this.y != 0) {
+                            perc = 100 * this.y / this.total
+                            return Highcharts.numberFormat(perc,0) + '%';
+                           } else {
+                            return null;}}")),
+                      style = list(textOutline = F))))  %>%
+  hc_add_series(name = "3+ Exacerbations", data = exac3p_gen, color = '#E26F2D')%>%
+   hc_add_series(name = "2 Exacerbations", data = exac2_gen, color = '#FFA977')%>%
+  hc_add_series(name = "1 Exacerbation", data = exac1_gen, color = '#9EB9D4') %>%
+  hc_add_series(name = "0 Exacerbations", data = exac0_gen, color = '#0D5295') %>%
+    hc_tooltip(pointFormat = '<b>{series.name}</b><br/><b>Count</b>: {point.y:,.0f}<br/><small>Total Patients: {point.total:,.0f}</small>',
+               useHTML = T, headerFormat = '') %>%
+    hc_legend(reversed = T) %>%
+    hc_yAxis(labels = list(format = "{value}%"), tickInterval = 10, minorTicks = T, minorTickInterval = 5) 
+
+gen_exac
+```
+
+---
+
+## General Exacerbation Breakdown
+
+The following outliers were captured in the Questionnaire data and used when calculating the regression line but are not shown on this graph: 
+
+* 1 patient reported 2,222 General Exacerbations
+
+
+```{r gen_exac_scatter, message=FALSE, warning=FALSE}
+gen_q <- filter(questionnaire_pats, question_id == 123)%>% 
+  mutate(exac_type = 'General exacerbation') %>% 
+  select(c(opc_patient_id, exac_type, response)) %>% 
+  rename(patient_id = opc_patient_id, 
+         response_q = response)
+
+gen_ehr <- all_pats1 %>% 
+  mutate(exac_type = 'General exacerbation') %>% 
+  select(c(patient_id, exac_type, exacb_tot_codes)) %>% 
+  rename(response_ehr = exacb_tot_codes)
+
+
+exac_scatter_gen <- left_join(gen_ehr, gen_q, by = c('patient_id', 'exac_type')) %>% 
+  distinct(patient_id, exac_type, .keep_all = T)
+
+hchart(exac_scatter_gen, "point", hcaes(response_ehr, response_q), regression = TRUE) %>% 
+  hc_colors(c("#d35400", "#2980b9", "#2ecc71")) %>% 
+  hc_add_dependency("plugins/highcharts-regression.js") %>% 
+  hc_xAxis(title = list(text = 'EMR Responses'), labels = list(useHTML = T), max = 10) %>%
+  hc_yAxis(title = list(text = 'Questionnaire Responses'), labels = list(useHTML = T), max = 10) %>%
+  hc_tooltip(pointFormat = '<b>EMR</b>: {point.x:,.0f}</b><br/><b>Questionnaire</b>: {point.y:,.0f}',
+               useHTML = T, headerFormat = '') 
+
+# 
+# gen_hc <- highchart() %>%
+#   hc_add_series(exac_scatter_gen, "scatter", hcaes(response_ehr, response_q), showInLegend = F) %>% 
+#   hc_add_series(exac_scatter_gen, "line", hcaes(x = response_ehr, y = response_ehr), enableMouseTracking = F, showInLegend = F) %>% 
+#   hc_add_dependency("plugins/highcharts-regression.js")%>% 
+#   hc_xAxis(title = list(text = 'EMR Responses'), labels = list(useHTML = T), max = 10) %>%
+#   hc_yAxis(title = list(text = 'Questionnaire Responses'), labels = list(useHTML = T), max = 10) %>%
+#   hc_tooltip(pointFormat = '<b>EMR</b>: {point.x:,.0f}</b><br/><b>Qestionnaire</b>: {point.y:,.0f}',
+#                useHTML = T, headerFormat = '') 
+# 
+# gen_hc
+```
+
+---

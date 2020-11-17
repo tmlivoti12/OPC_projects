@@ -1,0 +1,673 @@
+---
+title: "COPD 2018-2020 Exacerbation Comparison: Frequently Exacerbating Patients"
+author: "Tessa LiVoti"
+date: "Oct. 20, 2020"
+output:
+  rmdformats::readthedown:
+    number_sections: true
+    highlight: kate
+    mathjax: false
+    use_bookdown: true
+    cards: true
+    css: custom.css
+    toc_float: true
+      
+---
+
+<style type="text/css">
+.main-container {
+  max-width: 1000px !important;
+  margin-left: auto;
+  margin-right: auto;
+}
+div.rect {
+  border: 2px solid #cb6328;
+  border-radius: 15px;
+  padding: 10px;
+}
+</style>
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = F, comment="", fig.height=5, fig.pos='H')
+library(highcharter)
+library(htmlwidgets)
+library(kableExtra)
+library(htmltools)
+library(lubridate)
+library(ggplot2)
+library(dplyr)
+library(Hmisc)
+library(knitr)
+library(tidyr)
+library(RODBC) 
+library(DT)
+
+
+options(scipen=6, stringsAsFactors = F)
+
+lang <- getOption("highcharter.lang")
+lang$thousandsSep <-  ","
+options(highcharter.lang = lang)
+
+security <- read.csv("databasePass.csv", header = T)
+
+
+my_server <- "192.168.1.11"
+my_db <- "tessa_db"
+
+db <- odbcDriverConnect(paste0("DRIVER={SQL Server};
+                              server=",my_server,";
+                              database=",my_db,";
+                              uid=",security$UserName[1],";
+                              pwd=",security$Password[1]))
+
+report_query_all_pats <-  paste0("select count(distinct patient_id) from tessa_db.dbo.bics_patients;")
+all_pats_after_sept_2020 <- sqlQuery(db, report_query_all_pats)
+
+report_data_query_2020 <- paste0("SELECT * FROM tessa_db.dbo.freq_exac_pat_2020 where copd_diag is not null and copd_resolved is null;")
+all_pats_2020 <- sqlQuery(db, report_data_query_2020) %>% distinct()
+
+report_data_query_2019 <- paste0("SELECT * FROM tessa_db.dbo.freq_exac_pat_2019 where copd_diag is not null and copd_resolved is null;")
+all_pats_2019 <- sqlQuery(db, report_data_query_2019) %>% distinct()
+
+report_data_query_2019 <- paste0("SELECT * FROM tessa_db.dbo.freq_exac_pat_2018 where copd_diag is not null and copd_resolved is null;")
+all_pats_2018 <- sqlQuery(db, report_data_query_2019) %>%  distinct()
+
+
+total_pats <- length(unique(all_pats_2019$patient_id))
+total_practices <- length(unique(all_pats_2019$practice_id))
+```
+
+
+# Purpose 
+
+The following is a report comparing COPD patients EMR recorded exacerbations from March - September 2018, March - September 2019 and March - September 2020. The population was restricted to `r paste0("<b>", format(total_pats, big.mark = ','), "</b>")` patients from `r paste0("<b>", format(total_practices, big.mark = ','), "</b>")` practices that had an audit date after Sept. 2020.
+
+
+---
+
+# Population Selection 
+
+```{r patientBreakdown, fig.height = 3, fig.align='center'}
+library(DiagrammeR)
+
+# total number of exacerbations march 2019-2020 - all pats: 358883
+# total number of freq exac pats march 2019-2020 - all pats: 28434
+# total number of freq exac pats march 2019-2020 - all pats: 28434
+
+after_sept <- 345504
+total_exac_march <- 358883
+total_exac_march_2020 <- nrow(all_pats_2020[(all_pats_2020$exacb_total > 1),])
+total_exac_march_2019 <- nrow(all_pats_2020[(all_pats_2019$exacb_total > 1),])
+total_exac_march_2018 <- nrow(all_pats_2020[(all_pats_2018$exacb_total > 1),])
+
+freq_exac_pats <- 25649
+freq_exac_pats_exac_total <- 261629
+
+
+
+d <- c(A1 = paste0("<b>Total Asthma/COPD Patients with Audit Date after Sept. 2020:       <font color = '#548235'>", format(all_pats_after_sept_2020, big.mark =
+                                                                                                              ','),
+                   "</font></b>"),
+       A2 = paste("<b>Patients with Frequent Exacerbations*:     <font color = 'white'>",
+                  format(freq_exac_pats, big.mark = ','),"</font></b><br/><br/><font point-size = '9pt'>*defined as patients with 2 or more exacerbations from March 2019-2020</font>"),
+       A = paste("<b>COPD Patients:      <font color = 'white'>", format(total_pats, big.mark = ','), 
+                  "</font></b>"),
+       P = paste("<b>Total Patients with at least 2 Exacerbations:     <font color = 'white'>", format(total_exac_march_2020, big.mark = ','),  "</font></b><br/><br/><font point-size = '9pt'>from March - Sept. 2020</font>"),
+       P1 = paste("<b>Total Patients with at least 2 Exacerbations:     <font color = 'white'>", format(total_exac_march_2019, big.mark = ','),  "</font></b><br/><br/><font point-size = '9pt'>from March - Sept. 2019</font>"),
+       P2 = paste("<b>Total Patients with at least 2 Exacerbations:     <font color = 'white'>", format(total_exac_march_2018, big.mark = ','),  "</font></b><br/><br/><font point-size = '9pt'>from March - Sept. 2018</font>"))
+
+
+
+  
+graphText <- "
+    digraph SampleFiltering {
+
+        node [shape = octogon,
+        fontname = Helvetica,
+        width = 2, 
+        style = filled,
+        penwidth = 2,
+        color = '#D5E3F0']
+        Total; 
+        
+        node [shape = octogon,
+        fontname = Helvetica,
+        width = 2, 
+        style = filled,
+        penwidth = 2,
+        color = '#7AA7D3']
+        Freq;
+        
+        node [shape = box,
+        fontname = Helvetica,
+        width = 2,
+        style = filled,
+        penwidth = 2,
+        color = '#FFA977']
+        Asthma; 
+
+        
+        node [shape = box,
+        fontname = Helvetica,
+        width = 2,
+        style = filled,
+        penwidth = 2,
+        minlen = 3,
+        color = '#0D5295']
+        Exacerbations_2020;
+        
+        
+        node [shape = box,
+        fontname = Helvetica,
+        width = 2,
+        style = filled,
+        penwidth = 2,
+        minlen = 3,
+        color = '#9EB9D4']
+        Exacerbations_2019;
+        
+        
+        node [shape = box,
+        fontname = Helvetica,
+        width = 2,
+        style = filled,
+        penwidth = 2,
+        minlen = 3,
+        color = '#FFA977']
+        Exacerbations_2018;
+        
+        # edge statements
+        Total->Freq->Asthma
+        {rank=same ; Asthma->Exacerbations_2020}
+        Exacerbations_2020->Exacerbations_2019
+        Exacerbations_2019->Exacerbations_2018
+
+        Total [label = <@@1-1>]
+        Freq [label = <@@1-2>]
+        Asthma [label = <@@1-3>]
+        Exacerbations_2020 [label = <@@1-4>]
+        Exacerbations_2019 [label = <@@1-5>]
+        Exacerbations_2018 [label = <@@1-6>]
+       
+
+    }
+
+
+"
+
+graphText <- gsub('@@1-1', d[1], graphText)
+graphText <- gsub('@@1-2', d[2], graphText)
+graphText <- gsub('@@1-3', d[3], graphText)
+graphText <- gsub('@@1-4', d[4], graphText)
+graphText <- gsub('@@1-5', d[5], graphText)
+graphText <- gsub('@@1-6', d[6], graphText)
+
+
+grViz(graphText)  
+  
+```
+
+---
+
+\newpage
+
+# Overall Exacerbation Rates
+
+Exacerbation rates were comapred using patient's EMR looking at March - September 2018, March - September 2019 and March - September 2020. These are split into 3 categories, each containing patients that have had <b>at least 1 of the following</b>:
+
+* COPD exacerbation 
+  + Explicit COPD coded exacerbation 
+  + Acute OCS prescription
+  + Hospital admission 
+
+
+```{r all_exac}
+ocs_exac_total_ehr_2020 <- nrow(all_pats_2020[(all_pats_2020$ocs_acute > 0),])
+ha_exac_total_ehr_2020 <- nrow(all_pats_2020[(all_pats_2020$hosp_admit > 0),])
+copd_exac_totalehr_2020 <- nrow(all_pats_2020[(all_pats_2020$exacb_copd > 0),])
+copd_exac_codes_totalehr_2020 <- nrow(all_pats_2020[(all_pats_2020$exacb_copd_codes > 0),])
+
+ocs_exac_total_ehr_2019 <- nrow(all_pats_2019[(all_pats_2019$ocs_acute > 0),])
+ha_exac_total_ehr_2019 <- nrow(all_pats_2019[(all_pats_2019$hosp_admit > 0),])
+copd_exac_totalehr_2019 <- nrow(all_pats_2019[(all_pats_2019$exacb_copd > 0),])
+copd_exac_codes_totalehr_2019 <- nrow(all_pats_2019[(all_pats_2019$exacb_copd_codes > 0),])
+
+ocs_exac_total_ehr_2018 <- nrow(all_pats_2018[(all_pats_2018$ocs_acute > 0),])
+ha_exac_total_ehr_2018 <- nrow(all_pats_2018[(all_pats_2018$hosp_admit > 0),])
+copd_exac_totalehr_2018 <- nrow(all_pats_2018[(all_pats_2018$exacb_copd > 0),])
+copd_exac_codes_totalehr_2018 <- nrow(all_pats_2018[(all_pats_2018$exacb_copd_codes > 0),])
+
+
+exac_all_2020 <- data.frame(y = round(c(copd_exac_totalehr_2020,
+                                   copd_exac_codes_totalehr_2020,
+                                   ocs_exac_total_ehr_2020,
+                                   ha_exac_total_ehr_2020)/total_pats*100,1),
+                                  count = format(c(copd_exac_totalehr_2020,
+                                   copd_exac_codes_totalehr_2020,
+                                   ocs_exac_total_ehr_2020,
+                                   ha_exac_total_ehr_2020), big.mark = ',')) %>% 
+  mutate(y = as.numeric(y), pointWidth = c(90, 40, 40, 40))
+
+exac_all_2019 <- data.frame(y = round(c(copd_exac_totalehr_2019,
+                                        copd_exac_codes_totalehr_2019,
+                                        ocs_exac_total_ehr_2019,
+                                        ha_exac_total_ehr_2019)/total_pats*100,1),
+                            count = format(c(copd_exac_totalehr_2019,
+                                             copd_exac_codes_totalehr_2019,
+                                             ocs_exac_total_ehr_2019,
+                                             ha_exac_total_ehr_2019), big.mark = ',')) %>% 
+  mutate(y = as.numeric(y), pointWidth = c(90, 40, 40, 40))
+
+exac_all_2018 <- data.frame(y = round(c(copd_exac_totalehr_2018,
+                                        copd_exac_codes_totalehr_2018,
+                                        ocs_exac_total_ehr_2018,
+                                        ha_exac_total_ehr_2018)/total_pats*100,1),
+                            count = format(c(copd_exac_totalehr_2018,
+                                        copd_exac_codes_totalehr_2018,
+                                        ocs_exac_total_ehr_2018,
+                                        ha_exac_total_ehr_2018), big.mark = ',')) %>% 
+  mutate(y = as.numeric(y), pointWidth = c(90, 40, 40, 40))
+
+
+
+
+
+library(highcharter)
+total_exac <- highchart() %>%
+  hc_chart(type = 'column') %>%
+  hc_xAxis(type="category", title = list(text = 'Exacerbation Rate Comparison'), labels = list(useHTML = T), 
+           categories = c('COPD Exacerbation',  
+                          'Explicit COPD Exacerbation Code', 
+                          'Acute OCS Prescription', 'Hospital Admission')) %>%
+  hc_plotOptions(series = list(groupPadding = 0.2, pointPadding = -.4)) %>%
+  hc_add_series(name = "March - Sept. 2018", data =  exac_all_2018, useHTML = T,
+                color = '#FFA977') %>%
+  hc_add_series(name = "March - Sept. 2019", data =  exac_all_2019, useHTML = T,
+                color = '#9EB9D4') %>%
+  hc_add_series(name = "March - Sept. 2020", data =  exac_all_2020, useHTML = T,
+                color = '#0D5295') %>%
+  hc_tooltip(pointFormat = paste('<b>{series.name}</b><br/><b>Percent of Pop</b>:{point.y}%<br/><b>Count</b>: {point.count}<br/><b>Total Populaiton</b>:15,029'), 
+             useHTML = T)  %>%
+  hc_yAxis(labels = list(format = "{value}%"), tickInterval = 5, max = 100)%>%
+  hc_size(height = 400)
+
+total_exac
+```
+
+
+\newpage 
+
+The average and standard deviation has also been caluculated for these categories.
+
+
+```{r mrcTable}
+# ocs
+avg_copd_2020 <- mean(all_pats_2020$exacb_copd)
+avg_ocs_2020 <- mean(all_pats_2020$ocs_acute)
+avg_ha_2020 <- mean(all_pats_2020$hosp_admit)
+avg_gen_2020 <- mean(all_pats_2020$exacb_copd_codes)
+
+avg_copd_2019 <- mean(all_pats_2019$exacb_copd)
+avg_ocs_2019 <- mean(all_pats_2019$ocs_acute)
+avg_ha_2019 <- mean(all_pats_2019$hosp_admit)
+avg_gen_2019 <- mean(all_pats_2019$exacb_copd_codes)
+
+avg_copd_2018 <- mean(all_pats_2018$exacb_copd)
+avg_ocs_2018 <- mean(all_pats_2018$ocs_acute)
+avg_ha_2018 <- mean(all_pats_2018$hosp_admit)
+avg_gen_2018 <- mean(all_pats_2018$exacb_copd_codes)
+
+
+sd_copd_2020 <- sd(all_pats_2020$exacb_copd)
+sd_ocs_2020 <- sd(all_pats_2020$ocs_acute)
+sd_ha_2020 <- sd(all_pats_2020$hosp_admit)
+sd_gen_2020 <- sd(all_pats_2020$exacb_copd_codes)
+
+sd_copd_2019 <- sd(all_pats_2019$exacb_copd)
+sd_ocs_2019 <- sd(all_pats_2019$ocs_acute)
+sd_ha_2019 <- sd(all_pats_2019$hosp_admit)
+sd_gen_2019 <- sd(all_pats_2019$exacb_copd_codes)
+
+sd_copd_2018 <- sd(all_pats_2018$exacb_copd)
+sd_ocs_2018 <- sd(all_pats_2018$ocs_acute)
+sd_ha_2018 <- sd(all_pats_2018$hosp_admit)
+sd_gen_2018 <- sd(all_pats_2018$exacb_copd_codes)
+
+sd <- data.frame(measure = c('COPD Exacerbation', 'Acute OCS', 'Hospital Admissions', 'Explicit COPD Exacerbation Code'), 
+                 avg2020 = round(c(avg_copd_2020, avg_ocs_2020, avg_ha_2020, avg_gen_2020), digits = 2), 
+                 avg2019 = round(c(avg_copd_2019, avg_ocs_2019, avg_ha_2019, avg_gen_2019), digits = 2),
+                 avg2018 = round(c(avg_copd_2018, avg_ocs_2018, avg_ha_2018, avg_gen_2018), digits = 2),
+                 sd_2020 = round(c(sd_copd_2020, sd_ocs_2020, sd_ha_2020, sd_gen_2020), digits = 2),
+                 sd_2019 = round(c(sd_copd_2019, sd_ocs_2019, sd_ha_2019, sd_gen_2019), digits = 2),
+                 sd_2018 = round(c(sd_copd_2018, sd_ocs_2018, sd_ha_2018, sd_gen_2018), digits = 2))
+
+
+colnames(sd)[1] <- 'Measure'
+colnames(sd)[2] <- 'March - Sept. 2020 Average'
+colnames(sd)[3] <- 'March - Sept. 2019 Average'
+colnames(sd)[4] <- 'March - Sept. 2018 Average'
+colnames(sd)[5] <- 'March - Sept. 2020 Standard Deviation'
+colnames(sd)[6] <- 'March - Sept. 2019 Standard Deviation'
+colnames(sd)[7] <- 'March - Sept. 2018 Standard Deviation'
+
+kable(sd, "html", escape = F, align = "l", booktab = T) %>%
+  row_spec(0, background = '#a9a9a9')
+
+
+```
+
+---
+
+\newpage
+
+# COPD Exacerbation Rates
+
+This section breaks down the total number of COPD exacerbations by frequency.
+
+```{r copd_exac}
+copd_exac_0_2020 <- nrow(all_pats_2020[(all_pats_2020$exacb_copd == 0),])
+copd_exac_1_2020 <- nrow(all_pats_2020[(all_pats_2020$exacb_copd == 1),])
+copd_exac_2_2020 <- nrow(all_pats_2020[(all_pats_2020$exacb_copd == 2),])
+copd_exac_3p_2020 <- nrow(all_pats_2020[(all_pats_2020$exacb_copd > 2),])
+
+emr_copd_2020 <- data.frame(y = round(c(copd_exac_0_2020, 
+                                                    copd_exac_1_2020, 
+                                                     copd_exac_2_2020, 
+                                                     copd_exac_3p_2020)/total_pats*100,1),
+                                     count = format(c(copd_exac_0_2020, 
+                                                    copd_exac_1_2020, 
+                                                     copd_exac_2_2020, 
+                                                     copd_exac_3p_2020), big.mark = ','))
+
+copd_exac_0_2019 <- nrow(all_pats_2019[(all_pats_2019$exacb_copd == 0),])
+copd_exac_1_2019 <- nrow(all_pats_2019[(all_pats_2019$exacb_copd == 1),])
+copd_exac_2_2019 <- nrow(all_pats_2019[(all_pats_2019$exacb_copd == 2),])
+copd_exac_3p_2019 <- nrow(all_pats_2019[(all_pats_2019$exacb_copd > 2),])
+
+emr_copd_2019 <- data.frame(y = round(c(copd_exac_0_2019, 
+                                          copd_exac_1_2019, 
+                                          copd_exac_2_2019, 
+                                          copd_exac_3p_2019)/total_pats*100,1),
+                              count = format(c(copd_exac_0_2019, 
+                                          copd_exac_1_2019, 
+                                          copd_exac_2_2019, 
+                                          copd_exac_3p_2019), big.mark = ','))
+
+copd_exac_0_2018 <- nrow(all_pats_2018[(all_pats_2018$exacb_copd == 0),])
+copd_exac_1_2018 <- nrow(all_pats_2018[(all_pats_2018$exacb_copd == 1),])
+copd_exac_2_2018 <- nrow(all_pats_2018[(all_pats_2018$exacb_copd == 2),])
+copd_exac_3p_2018 <- nrow(all_pats_2018[(all_pats_2018$exacb_copd > 2),])
+
+
+exac0_copd <- data.frame(y = c(copd_exac_0_2020, copd_exac_0_2019, copd_exac_0_2018), 
+                      category = c('March - Sept. 2020', 'March - Sept. 2019', 'March - Sept. 2018'))
+exac1_copd <- data.frame(y = c(copd_exac_1_2020, copd_exac_1_2019, copd_exac_1_2018), 
+                      category = c('March - Sept. 2020', 'March - Sept. 2019', 'March - Sept. 2018'))
+exac2_copd <- data.frame(y = c(copd_exac_2_2020, copd_exac_2_2019, copd_exac_2_2018), 
+                      category = c('March - Sept. 2020', 'March - Sept. 2019', 'March - Sept. 2018'))
+exac3p_copd <- data.frame(y = c(copd_exac_3p_2020, copd_exac_3p_2019, copd_exac_3p_2018), 
+                      category = c('March - Sept. 2020', 'March - Sept. 2019', 'March - Sept. 2018'))
+
+
+library(highcharter)
+copd_exac <- highchart() %>%
+  hc_chart(type = "bar") %>%
+  hc_xAxis(type = "category", categories = c('March - Sept. 2020', 'March - Sept. 2019', 'March - Sept. 2018')) %>%
+  hc_plotOptions(series = list(stacking = "percent", pointPadding = .1,
+                 dataLabels = list(enabled = T, formatter = JS(paste0("function() {
+                           if (this.y != 0) {
+                            perc = 100 * this.y / this.total
+                            return Highcharts.numberFormat(perc,0) + '%';
+                           } else {
+                            return null;}}")),
+                      style = list(textOutline = F)))) %>%
+  hc_add_series(name = "3+ Exacerbations", data = exac3p_copd, color = '#E26F2D')%>%
+   hc_add_series(name = "2 Exacerbations", data = exac2_copd, color = '#FFA977')%>%
+  hc_add_series(name = "1 Exacerbation", data = exac1_copd, color = '#9EB9D4') %>%
+  hc_add_series(name = "0 Exacerbations", data = exac0_copd, color = '#0D5295') %>%
+    hc_tooltip(pointFormat = '<b>{series.name}</b><br/><b>Count</b>: {point.y:,.0f}<br/><small>Total Patients: {point.total:,.0f}</small>',
+               useHTML = T, headerFormat = '') %>%
+    hc_legend(reversed = T) %>%
+    hc_yAxis(labels = list(format = "{value}%"), tickInterval = 10, minorTicks = T, minorTickInterval = 5) %>%
+  hc_size(height = 400)
+
+
+copd_exac
+```
+
+
+---
+
+\newpage
+
+## Explicit Code for COPD Exacerbations
+
+The following sections break down the frequencies of each of the total number of asthma exacerbations parts: explicit coding, acute OCS, and hospital admissions.
+
+```{r copd_codes_exac}
+copd_codes_exac_0_2020 <- nrow(all_pats_2020[(all_pats_2020$exacb_copd_codes == 0),])
+copd_codes_exac_1_2020 <- nrow(all_pats_2020[(all_pats_2020$exacb_copd_codes == 1),])
+copd_codes_exac_2_2020 <- nrow(all_pats_2020[(all_pats_2020$exacb_copd_codes == 2),])
+copd_codes_exac_3p_2020 <- nrow(all_pats_2020[(all_pats_2020$exacb_copd_codes > 2),])
+
+emr_copd_codes_2020 <- data.frame(y = round(c(copd_codes_exac_0_2020, 
+                                                    copd_codes_exac_1_2020, 
+                                                     copd_codes_exac_2_2020, 
+                                                     copd_codes_exac_3p_2020)/total_pats*100,1),
+                                     count = format(c(copd_codes_exac_0_2020, 
+                                                    copd_codes_exac_1_2020, 
+                                                     copd_codes_exac_2_2020, 
+                                                     copd_codes_exac_3p_2020), big.mark = ','))
+
+copd_codes_exac_0_2019 <- nrow(all_pats_2019[(all_pats_2019$exacb_copd_codes == 0),])
+copd_codes_exac_1_2019 <- nrow(all_pats_2019[(all_pats_2019$exacb_copd_codes == 1),])
+copd_codes_exac_2_2019 <- nrow(all_pats_2019[(all_pats_2019$exacb_copd_codes == 2),])
+copd_codes_exac_3p_2019 <- nrow(all_pats_2019[(all_pats_2019$exacb_copd_codes > 2),])
+
+emr_copd_codes_2019 <- data.frame(y = round(c(copd_codes_exac_0_2019, 
+                                          copd_codes_exac_1_2019, 
+                                          copd_codes_exac_2_2019, 
+                                          copd_codes_exac_3p_2019)/total_pats*100,1),
+                              count = format(c(copd_codes_exac_0_2019, 
+                                          copd_codes_exac_1_2019, 
+                                          copd_codes_exac_2_2019, 
+                                          copd_codes_exac_3p_2019), big.mark = ','))
+
+copd_codes_exac_0_2018 <- nrow(all_pats_2018[(all_pats_2018$exacb_copd_codes == 0),])
+copd_codes_exac_1_2018 <- nrow(all_pats_2018[(all_pats_2018$exacb_copd_codes == 1),])
+copd_codes_exac_2_2018 <- nrow(all_pats_2018[(all_pats_2018$exacb_copd_codes == 2),])
+copd_codes_exac_3p_2018 <- nrow(all_pats_2018[(all_pats_2018$exacb_copd_codes > 2),])
+
+
+exac0_copd_codes <- data.frame(y = c(copd_codes_exac_0_2020, copd_codes_exac_0_2019, copd_codes_exac_0_2018), 
+                      category = c('March - Sept. 2020', 'March - Sept. 2019', 'March - Sept. 2018'))
+exac1_copd_codes <- data.frame(y = c(copd_codes_exac_1_2020, copd_codes_exac_1_2019, copd_codes_exac_1_2018), 
+                      category = c('March - Sept. 2020', 'March - Sept. 2019', 'March - Sept. 2018'))
+exac2_copd_codes <- data.frame(y = c(copd_codes_exac_2_2020, copd_codes_exac_2_2019, copd_codes_exac_2_2018), 
+                      category = c('March - Sept. 2020', 'March - Sept. 2019', 'March - Sept. 2018'))
+exac3p_copd_codes <- data.frame(y = c(copd_codes_exac_3p_2020, copd_codes_exac_3p_2019 , copd_codes_exac_3p_2018), 
+                      category = c('March - Sept. 2020', 'March - Sept. 2019', 'March - Sept. 2018'))
+
+
+library(highcharter)
+copd_codes_exac <- highchart() %>%
+  hc_chart(type = "bar") %>%
+  hc_xAxis(type = "category", categories = c('March - Sept. 2020', 'March - Sept. 2019', 'March - Sept. 2018')) %>%
+  hc_plotOptions(series = list(stacking = "percent", pointPadding = .1,
+                 dataLabels = list(enabled = T, formatter = JS(paste0("function() {
+                           if (this.y != 0) {
+                            perc = 100 * this.y / this.total
+                            return Highcharts.numberFormat(perc,0) + '%';
+                           } else {
+                            return null;}}")),
+                      style = list(textOutline = F)))) %>%
+  hc_add_series(name = "3+ Exacerbations", data = exac3p_copd_codes, color = '#E26F2D')%>%
+   hc_add_series(name = "2 Exacerbations", data = exac2_copd_codes, color = '#FFA977')%>%
+  hc_add_series(name = "1 Exacerbation", data = exac1_copd_codes, color = '#9EB9D4') %>%
+  hc_add_series(name = "0 Exacerbations", data = exac0_copd_codes, color = '#0D5295') %>%
+    hc_tooltip(pointFormat = '<b>{series.name}</b><br/><b>Count</b>: {point.y:,.0f}<br/><small>Total Patients: {point.total:,.0f}</small>',
+               useHTML = T, headerFormat = '') %>%
+    hc_legend(reversed = T) %>%
+    hc_yAxis(labels = list(format = "{value}%"), tickInterval = 10, minorTicks = T, minorTickInterval = 5) %>%
+  hc_size(height = 400)
+
+copd_codes_exac
+```
+
+
+---
+
+\newpage
+
+## Acute OCS Prescriptions
+
+
+```{r ocs_exac}
+ocs_exac_0_2020 <- nrow(all_pats_2020[(all_pats_2020$ocs_acute == 0),])
+ocs_exac_1_2020 <- nrow(all_pats_2020[(all_pats_2020$ocs_acute == 1),])
+ocs_exac_2_2020 <- nrow(all_pats_2020[(all_pats_2020$ocs_acute == 2),])
+ocs_exac_3p_2020 <- nrow(all_pats_2020[(all_pats_2020$ocs_acute > 2),])
+
+ocs_2020 <- data.frame(y = round(c(ocs_exac_0_2020, 
+                                                ocs_exac_1_2020, 
+                                                ocs_exac_2_2020, 
+                                                ocs_exac_3p_2020)/total_pats*100,1),
+                                  count = format(c(ocs_exac_0_2020, 
+                                                ocs_exac_1_2020, 
+                                                ocs_exac_2_2020, 
+                                                ocs_exac_3p_2020), big.mark = ','))
+
+ocs_exac_0_2019 <- nrow(all_pats_2019[(all_pats_2019$ocs_acute == 0),])
+ocs_exac_1_2019 <- nrow(all_pats_2019[(all_pats_2019$ocs_acute == 1),])
+ocs_exac_2_2019 <- nrow(all_pats_2019[(all_pats_2019$ocs_acute == 2),])
+ocs_exac_3p_2019 <- nrow(all_pats_2019[(all_pats_2019$ocs_acute > 2),])
+
+ocs_2019 <- data.frame(y = round(c(ocs_exac_0_2019, 
+                                   ocs_exac_1_2019, 
+                                   ocs_exac_2_2019, 
+                                   ocs_exac_3p_2019)/total_pats*100,1),
+                       count = format(c(ocs_exac_0_2019, 
+                                        ocs_exac_1_2019, 
+                                        ocs_exac_2_2019, 
+                                        ocs_exac_3p_2019), big.mark = ','))
+
+ocs_exac_0_2018 <- nrow(all_pats_2018[(all_pats_2018$ocs_acute == 0),])
+ocs_exac_1_2018 <- nrow(all_pats_2018[(all_pats_2018$ocs_acute == 1),])
+ocs_exac_2_2018 <- nrow(all_pats_2018[(all_pats_2018$ocs_acute == 2),])
+ocs_exac_3p_2018 <- nrow(all_pats_2018[(all_pats_2018$ocs_acute > 2),])
+
+exac0_ocs <- data.frame(y = c(ocs_exac_0_2020, ocs_exac_0_2019, ocs_exac_0_2018), 
+                      category = c('March - Sept. 2020', 'March - Sept. 2019', 'March - Sept. 2018'))
+exac1_ocs <- data.frame(y = c(ocs_exac_1_2020, ocs_exac_1_2019, ocs_exac_1_2018), 
+                      category = c('March - Sept. 2020', 'March - Sept. 2019', 'March - Sept. 2018'))
+exac2_ocs <- data.frame(y = c(ocs_exac_2_2020, ocs_exac_2_2019, ocs_exac_2_2018), 
+                      category = c('March - Sept. 2020', 'March - Sept. 2019', 'March - Sept. 2018'))
+exac3p_ocs <- data.frame(y = c(ocs_exac_3p_2020, ocs_exac_3p_2019, ocs_exac_3p_2018), 
+                      category = c('March - Sept. 2020', 'March - Sept. 2019', 'March - Sept. 2018'))
+
+
+library(highcharter)
+ocs_exac <- highchart() %>%
+  hc_chart(type = "bar") %>%
+  hc_xAxis(type = "category", categories = c('March - Sept. 2020', 'March - Sept. 2019', 'March - Sept. 2018')) %>%
+  hc_plotOptions(series = list(stacking = "percent", pointPadding = .1,
+                 dataLabels = list(enabled = T, formatter = JS(paste0("function() {
+                           if (this.y != 0) {
+                            perc = 100 * this.y / this.total
+                            return Highcharts.numberFormat(perc,0) + '%';
+                           } else {
+                            return null;}}")),
+                      style = list(textOutline = F)))) %>%
+  hc_add_series(name = "3+ Acute OCS Prescriptions", data = exac3p_ocs, color = '#E26F2D')%>%
+   hc_add_series(name = "2 Acute OCS Prescriptions", data = exac2_ocs, color = '#FFA977')%>%
+  hc_add_series(name = "1 Acute OCS Prescription", data = exac1_ocs, color = '#9EB9D4') %>%
+  hc_add_series(name = "0 Acute OCS Prescriptions", data = exac0_ocs, color = '#0D5295') %>%
+    hc_tooltip(pointFormat = '<b>{series.name}</b><br/><b>Count</b>: {point.y:,.0f}<br/><small>Total Patients: {point.total:,.0f}</small>',
+               useHTML = T, headerFormat = '') %>%
+    hc_legend(reversed = T) %>%
+    hc_yAxis(labels = list(format = "{value}%"), tickInterval = 10, minorTicks = T, minorTickInterval = 5)%>%
+  hc_size(height = 400)
+
+ocs_exac
+```
+
+---
+
+\newpage
+
+## Hosptial Admissions
+
+
+```{r ha_exac}
+ha_exac_0_2020 <- nrow(all_pats_2020[(all_pats_2020$hosp_admit == 0),])
+ha_exac_1_2020 <- nrow(all_pats_2020[(all_pats_2020$hosp_admit == 1),])
+ha_exac_2_2020 <- nrow(all_pats_2020[(all_pats_2020$hosp_admit == 2),])
+ha_exac_3p_2020 <- nrow(all_pats_2020[(all_pats_2020$hosp_admit > 2),])
+
+
+ha_2020 <- data.frame(y = round(c(ha_exac_0_2020, 
+                                              ha_exac_1_2020, 
+                                              ha_exac_2_2020, 
+                                              ha_exac_3p_2020)/total_pats*100,1),
+                                    count = format(c(ha_exac_0_2020, 
+                                              ha_exac_1_2020, 
+                                              ha_exac_2_2020, 
+                                              ha_exac_3p_2020), big.mark = ','))
+
+ha_exac_0_2019 <- nrow(all_pats_2019[(all_pats_2019$hosp_admit == 0),])
+ha_exac_1_2019 <- nrow(all_pats_2019[(all_pats_2019$hosp_admit == 1),])
+ha_exac_2_2019 <- nrow(all_pats_2019[(all_pats_2019$hosp_admit == 2),])
+ha_exac_3p_2019 <- nrow(all_pats_2019[(all_pats_2019$hosp_admit > 2),])
+
+
+ha_2019 <- data.frame(y = round(c(ha_exac_0_2019, 
+                                  ha_exac_1_2019, 
+                                  ha_exac_2_2019, 
+                                  ha_exac_3p_2019)/total_pats*100,1),
+                      count = format(c(ha_exac_0_2019, 
+                                       ha_exac_1_2019, 
+                                       ha_exac_2_2019, 
+                                       ha_exac_3p_2019), big.mark = ','))
+
+ha_exac_0_2018 <- nrow(all_pats_2018[(all_pats_2018$hosp_admit == 0),])
+ha_exac_1_2018 <- nrow(all_pats_2018[(all_pats_2018$hosp_admit == 1),])
+ha_exac_2_2018 <- nrow(all_pats_2018[(all_pats_2018$hosp_admit == 2),])
+ha_exac_3p_2018 <- nrow(all_pats_2018[(all_pats_2018$hosp_admit > 2),])
+
+exac0_ha <- data.frame(y = c(ha_exac_0_2020, ha_exac_0_2019, ha_exac_0_2018), 
+                      category = c('March - Sept. 2020', 'March - Sept. 2019', 'March - Sept. 2018'))
+exac1_ha <- data.frame(y = c(ha_exac_1_2020, ha_exac_1_2019, ha_exac_1_2018), 
+                      category = c('March - Sept. 2020', 'March - Sept. 2019', 'March - Sept. 2018'))
+exac2_ha <- data.frame(y = c(ha_exac_2_2020, ha_exac_2_2019, ha_exac_2_2018), 
+                      category = c('March - Sept. 2020', 'March - Sept. 2019', 'March - Sept. 2018'))
+exac3p_ha <- data.frame(y = c(ha_exac_3p_2020, ha_exac_3p_2019, ha_exac_3p_2018), 
+                      category = c('March - Sept. 2020', 'March - Sept. 2019', 'March - Sept. 2018'))
+
+
+library(highcharter)
+ha_exac <- highchart() %>%
+  hc_chart(type = "bar") %>%
+  hc_xAxis(type = "category", categories = c('March - Sept. 2020', 'March - Sept. 2019', 'March - Sept. 2018')) %>%
+  hc_plotOptions(series = list(stacking = "percent", pointPadding = .1,
+                 dataLabels = list(enabled = T, formatter = JS(paste0("function() {
+                           if (this.y != 0) {
+                            perc = 100 * this.y / this.total
+                            return Highcharts.numberFormat(perc,0) + '%';
+                           } else {
+                            return null;}}")),
+                      style = list(textOutline = F)))) %>%
+  hc_add_series(name = "3+ Hospital Admissions", data = exac3p_ha, color = '#E26F2D')%>%
+   hc_add_series(name = "2 Hospital Admissions", data = exac2_ha, color = '#FFA977')%>%
+  hc_add_series(name = "1 Hospital Admission", data = exac1_ha, color = '#9EB9D4') %>%
+  hc_add_series(name = "0 Hospital Admissions", data = exac0_ha, color = '#0D5295') %>%
+    hc_tooltip(pointFormat = '<b>{series.name}</b><br/><b>Count</b>: {point.y:,.0f}<br/><small>Total Patients: {point.total:,.0f}</small>',
+               useHTML = T, headerFormat = '') %>%
+    hc_legend(reversed = T) %>%
+    hc_yAxis(labels = list(format = "{value}%"), tickInterval = 10, minorTicks = T, minorTickInterval = 5) %>%
+  hc_size(height = 400)
+
+
+ha_exac
+```
